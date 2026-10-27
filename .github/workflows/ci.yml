@@ -13,6 +13,9 @@ env:
 jobs:
   test-and-coverage:
     runs-on: ubuntu-latest
+    outputs:
+      semver: ${{ steps.version.outputs.semver }}
+      calver: ${{ steps.version.outputs.calver }}
     steps:
       - uses: actions/checkout@v4
 
@@ -21,19 +24,46 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm' # Optimizes pipeline duration by caching dependencies
 
+      - name: Compute SemVer and CalVer
+        id: version
+        run: |
+          # SemVer: MAJOR.MINOR.PATCH from package.json (source of truth)
+          SEMVER=$(node -p "require('./package.json').version")
+          # CalVer: YYYY.MM.DD.<run> — calendar-based release identifier
+          CALVER=$(date -u +%Y.%m.%d).${{ github.run_number }}
+
+          echo "semver=$SEMVER" >> "$GITHUB_OUTPUT"
+          echo "calver=$CALVER" >> "$GITHUB_OUTPUT"
+
+          printf '{\n  "semver": "%s",\n  "calver": "%s",\n  "gitSha": "%s",\n  "ref": "%s"\n}\n' \
+            "$SEMVER" "$CALVER" "${{ github.sha }}" "${{ github.ref_name }}" > version.json
+
+          echo "SemVer: $SEMVER"
+          echo "CalVer: $CALVER"
+
       - run: npm install
       - run: npm run test
 
       - name: Upload Pipeline Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: api-build-artifact
-          path: math.js
+          name: api-build-${{ steps.version.outputs.semver }}
+          path: |
+            math.js
+            package.json
+            version.json
           retention-days: 14 # Enforces the artifact retention strategy
 
       - name: Build Docker Image
         if: ${{ !startsWith(github.ref, 'refs/heads/hotfix/') }}
-        run: docker build -t pipeline-lab-api:latest .
+        run: |
+          docker build \
+            --label org.opencontainers.image.version=${{ steps.version.outputs.semver }} \
+            --label org.opencontainers.image.revision=${{ github.sha }} \
+            -t pipeline-lab-api:latest \
+            -t pipeline-lab-api:${{ steps.version.outputs.semver }} \
+            -t pipeline-lab-api:${{ steps.version.outputs.calver }} \
+            .
 
   deploy-to-production:
     needs: test-and-coverage
@@ -43,6 +73,8 @@ jobs:
       - name: Deploy Application
         run: |
           echo "Deploying ${{ env.APP_NAME }} to Production..."
+          echo "SemVer: ${{ needs.test-and-coverage.outputs.semver }}"
+          echo "CalVer: ${{ needs.test-and-coverage.outputs.calver }}"
           if [[ "${{ github.ref }}" == refs/heads/hotfix/* ]]; then
             echo "Hotfix fast-track deploy — Production emergency approval gate required."
           fi
