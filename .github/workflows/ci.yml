@@ -2,7 +2,9 @@ name: Node.js CI/CD Pipeline
 
 on:
   push:
-    branches: [ "main" ]
+    branches:
+      - main
+      - hotfix/**
 
 env:
   NODE_VERSION: '20.x'
@@ -13,11 +15,25 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
       - uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm' # Optimizes pipeline duration by caching dependencies
+
       - run: npm install
       - run: npm run test
+
+      - name: Upload Pipeline Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-build-artifact
+          path: math.js
+          retention-days: 14 # Enforces the artifact retention strategy
+
+      - name: Build Docker Image
+        if: ${{ !startsWith(github.ref, 'refs/heads/hotfix/') }}
+        run: docker build -t pipeline-lab-api:latest .
 
   deploy-to-production:
     needs: test-and-coverage
@@ -27,7 +43,7 @@ jobs:
       - name: Deploy Application
         run: |
           echo "Deploying ${{ env.APP_NAME }} to Production..."
+          if [[ "${{ github.ref }}" == refs/heads/hotfix/* ]]; then
+            echo "Hotfix fast-track deploy — Production emergency approval gate required."
+          fi
           echo "Deployment successful!"
-
-      - name: Build Docker Image
-        run: docker build -t pipeline-lab-api:latest .

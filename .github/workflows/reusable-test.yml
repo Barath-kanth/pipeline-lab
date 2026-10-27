@@ -1,0 +1,44 @@
+name: Reusable Test Workflow
+
+on:
+  workflow_call:
+    inputs:
+      node_version:
+        description: Node.js version to use for tests
+        required: false
+        type: string
+        default: '20.x'
+      lightweight:
+        description: Run an accelerated, lightweight test suite (hotfix path)
+        required: false
+        type: boolean
+        default: false
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ inputs.node_version }}
+
+      - run: npm install
+
+      - name: Run tests
+        run: |
+          if [ "${{ inputs.lightweight }}" = "true" ]; then
+            npx jest --ci
+          else
+            npm run test
+          fi
+
+      - name: Upload Pipeline Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: api-build-${{ github.sha }}
+          path: |
+            math.js
+            package.json
+          retention-days: 7
